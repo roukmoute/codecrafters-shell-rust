@@ -15,7 +15,10 @@ fn main() {
         let input_trimmed = input.trim();
         if input_trimmed.eq("exit 0") {
             process::exit(0);
-        } else {
+        } else if input_trimmed.starts_with("echo ") {
+            println!("{}", input_trimmed.replace("echo ", ""));
+        }
+        else {
             eprintln!("{}: command not found", input_trimmed);
         }
     }
