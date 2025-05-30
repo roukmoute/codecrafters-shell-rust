@@ -27,27 +27,31 @@ fn main() {
             if builtins.contains(&typed) {
                 println!("{} is a shell builtin", typed)
             } else {
-                let mut valid = false;
-                match env::var("PATH") {
-                    Ok(val) => {
-                        for path in env::split_paths(&val) {
-                            let binary_path = path.join(typed);
-                            if Path::new(&binary_path).exists() {
-                                valid = true;
-                                println!("{} is {}", typed, binary_path.display());
-                                break;
-                            }
-                        }
-                    },
-                    Err(e) => eprintln!("{e}")
-                }
-
-                if valid == false {
-                    eprintln!("{}: not found", typed)
-                }
+                is_executable_file(typed);
             }
         } else {
             eprintln!("{}: command not found", input_trimmed)
         }
+    }
+}
+
+fn is_executable_file(typed: &str) {
+    let mut valid = false;
+    match env::var("PATH") {
+        Ok(val) => {
+            for path in env::split_paths(&val) {
+                let binary_path = path.join(typed);
+                if Path::new(&binary_path).exists() {
+                    valid = true;
+                    println!("{} is {}", typed, binary_path.display());
+                    break;
+                }
+            }
+        },
+        Err(e) => eprintln!("{e}")
+    }
+
+    if valid == false {
+        eprintln!("{}: not found", typed)
     }
 }
