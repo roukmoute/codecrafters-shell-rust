@@ -1,7 +1,8 @@
 #[allow(unused_imports)]
 use std::io::{self, Write};
-use std::{env, process};
-use std::path::Path;
+use std::{env, fs, process};
+use std::path::{Path, PathBuf};
+use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 fn main() {
@@ -16,68 +17,75 @@ fn main() {
 
 
         let input_trimmed = input.trim();
-        let argv: Vec<_> = input_trimmed.split(" ").collect();
-        let program_name = argv[0];
-        if input_trimmed.eq("exit 0") {
-            process::exit(0);
-        } else if input_trimmed.starts_with("echo ") {
-            println!("{}", input_trimmed.replace("echo ", ""))
-        } else if input_trimmed.starts_with("type ") {
-            let typed = input_trimmed.trim_start_matches("type ");
-
-            let builtins = ["type", "echo", "exit"];
-
-            if builtins.contains(&typed) {
-                println!("{} is a shell builtin", typed)
-            } else {
-                write_typed_executable_file(typed);
+        let argv: Vec<&str> = input_trimmed.split_whitespace().collect();
+        let program_name = argv.first().copied();
+        match argv.as_slice() {
+            ["exit", "0"] => process::exit(0),
+            ["echo", args @ ..] => println!("{}", args.join(" ")),
+            ["type", args @ ..] => {
+                let builtins = ["type", "echo", "exit"];
+                if let Some(arg) = args.first() {
+                    if builtins.contains(&arg) {
+                        println!("{} is a shell builtin", arg);
+                    } else {
+                        print_executable_path(arg);
+                    }
+                }
             }
-        } else if is_executable_file(program_name) {
-            let output = Command::new(program_name)
-                .args(argv.iter().skip(1))
-                .output()
-                .expect("failed to execute program");
-            io::stdout().write_all(&output.stdout).unwrap();
-        }
-        else {
-            eprintln!("{}: command not found", input_trimmed)
+            _ => {
+                if let Some(name) = program_name {
+                    if let Some(path) = find_in_path(name, |p| p.exists()) {
+                        if is_executable(path) {
+                            let output = Command::new(name)
+                                .args(&argv[1..])
+                                .output();
+
+                            match output {
+                                Ok(result) => print!("{}", String::from_utf8_lossy(&result.stdout)),
+                                Err(_) => eprintln!("Execution error"),
+                            }
+                        }
+                    } else {
+                        eprintln!("{input_trimmed}: command not found")
+                    }
+                }
+            }
         }
     }
 }
 
-fn write_typed_executable_file(typed: &str) {
-    let mut valid = false;
-    match env::var("PATH") {
-        Ok(val) => {
-            for path in env::split_paths(&val) {
-                let binary_path = path.join(typed);
-                if Path::new(&binary_path).exists() {
-                    valid = true;
-                    println!("{} is {}", typed, binary_path.display());
-                    break;
-                }
-            }
-        },
-        Err(e) => eprintln!("{e}")
-    }
+fn print_executable_path<P: AsRef<Path>>(file_path: P) {
+    let filename = file_path.as_ref();
 
-    if valid == false {
-        eprintln!("{}: not found", typed);
+    match find_in_path(filename, |p| p.exists() && is_executable(p)) {
+        Some(path) => println!("{} is {}", filename.display(), path.display()),
+        None => eprintln!("{}: not found", filename.display())
     }
 }
 
-fn is_executable_file(typed: &str) -> bool {
-    match env::var("PATH") {
-        Ok(val) => {
-            for path in env::split_paths(&val) {
-                let binary_path = path.join(typed);
-                if Path::new(&binary_path).exists() {
-                    return true;
-                }
+fn find_in_path<P, F>(filename: P, predicate: F) -> Option<PathBuf>
+where
+    P: AsRef<Path>,
+    F: Fn(&PathBuf) -> bool
+{
+    if let Some(path_var) = env::var_os("PATH") {
+        for path in env::split_paths(&path_var) {
+            let binary_path = path.join(filename.as_ref());
+            if predicate(&binary_path) {
+                return Some(binary_path);
             }
-        },
-        Err(e) => eprintln!("{e}")
+        }
     }
+    None
+}
 
-    false
+fn is_executable<P: AsRef<Path>>(path: P) -> bool {
+    if let Ok(metadata) = fs::metadata(path) {
+        let mode = metadata.permissions().mode();
+
+        mode & 0o111 != 0
+    } else {
+        eprintln!("Oopsie");
+        false
+    }
 }
